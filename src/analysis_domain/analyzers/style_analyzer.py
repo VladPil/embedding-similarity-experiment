@@ -194,14 +194,47 @@ class StyleAnalyzer(BaseAnalyzer):
         return self._get_mock_style_response()
 
     def _get_mock_style_response(self) -> str:
-        """Мок-ответ для стиля"""
-        return json.dumps({
+        """Обогащенный мок-ответ для стиля с детальным анализом"""
+
+        # Обогащенные стилистические характеристики
+        style_characteristics = {
             "lexical_complexity": "средняя",
             "sentence_length": "средняя",
             "imagery": "средняя",
             "emotionality": "низкая",
             "formality": "нейтральная",
-        }, ensure_ascii=False)
+
+            # Дополнительные стилистические аспекты
+            "narrative_perspective": "третье лицо",  # первое/второе/третье/смешанное
+            "temporal_structure": "линейная",  # линейная/нелинейная/циклическая
+            "dialogue_density": "умеренная",  # низкая/умеренная/высокая
+            "descriptive_detail": "средняя",  # минимальная/средняя/богатая
+            "metaphorical_language": "умеренная",  # редкая/умеренная/обильная
+            "syntax_variety": "разнообразная",  # простая/разнообразная/сложная
+            "rhythm_pattern": "переменный",  # монотонный/переменный/динамичный
+            "tone_consistency": "стабильная",  # стабильная/переменная/контрастная
+
+            # Жанровые особенности
+            "literary_devices": [
+                "эпитеты", "сравнения", "метафоры", "олицетворение", "гипербола"
+            ],
+            "style_markers": [
+                "авторские отступления", "внутренние монологи", "описания природы"
+            ],
+
+            # Характеристики языка
+            "register_level": "нейтральный",  # разговорный/нейтральный/книжный
+            "archaic_elements": "отсутствуют",  # отсутствуют/редкие/заметные
+            "colloquial_expressions": "умеренные",  # редкие/умеренные/частые
+            "technical_vocabulary": "минимальная",  # минимальная/умеренная/специализированная
+
+            # Композиционные особенности
+            "paragraph_structure": "традиционная",  # традиционная/экспериментальная
+            "chapter_organization": "хронологическая",  # хронологическая/тематическая/ассоциативная
+            "pacing_variation": "равномерная"  # равномерная/контрастная/градуальная
+        }
+
+        return json.dumps(style_characteristics, ensure_ascii=False)
 
     async def _parse_style_response(self, response: str) -> Dict[str, Any]:
         """Парсинг ответа LLM"""

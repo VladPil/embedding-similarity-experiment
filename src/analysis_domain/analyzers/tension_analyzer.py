@@ -55,8 +55,23 @@ class TensionAnalyzer(BaseAnalyzer):
         self.indexer = ChunkIndexer()
 
     @property
+    def name(self) -> str:
+        """Уникальное имя анализатора"""
+        return "tension"
+
+    @property
+    def display_name(self) -> str:
+        """Человекочитаемое название"""
+        return "Анализ напряжения"
+
+    @property
+    def description(self) -> str:
+        """Описание анализатора"""
+        return "Находит пики напряжения в произведении и анализирует динамику эмоционального напряжения"
+
+    @property
     def requires_llm(self) -> bool:
-        """Требуется LLM для описания пиков"""
+        """Требуется LLM для анализа пиков напряжения"""
         return True
 
     @property
@@ -116,8 +131,8 @@ class TensionAnalyzer(BaseAnalyzer):
             if not tension_chunks:
                 logger.info("Не найдено пиков напряжения")
                 return AnalysisResult(
-                    analyzer_type=self.__class__.__name__,
                     text_id=text.id,
+                    analyzer_name=self.name,
                     mode=mode,
                     data={
                         "average_tension": round(average_tension, 2),
@@ -137,8 +152,8 @@ class TensionAnalyzer(BaseAnalyzer):
             logger.info(f"Проанализировано {len(tension_points)} пиков напряжения")
 
             return AnalysisResult(
-                analyzer_type=self.__class__.__name__,
                 text_id=text.id,
+                analyzer_name=self.name,
                 mode=mode,
                 data={
                     "average_tension": round(average_tension, 2),
@@ -225,19 +240,61 @@ class TensionAnalyzer(BaseAnalyzer):
         Returns:
             str: Отформатированный промпт
         """
+
+        # Обогащенные примеры источников напряжения
+        tension_sources_examples = {
+            "conflict": [
+                "ссора", "спор", "драка", "конфликт", "разногласие", "противостояние",
+                "вражда", "столкновение интересов", "борьба за власть", "соперничество"
+            ],
+            "danger": [
+                "опасность", "угроза", "риск", "катастрофа", "несчастный случай",
+                "нападение", "преследование", "стихийное бедствие", "болезнь", "смерть"
+            ],
+            "mystery": [
+                "тайна", "загадка", "секрет", "неизвестность", "мистика", "странные события",
+                "исчезновение", "необъяснимое явление", "скрытая правда", "заговор"
+            ],
+            "emotion": [
+                "страх", "тревога", "отчаяние", "гнев", "ревность", "вина", "стыд",
+                "одиночество", "предательство", "потеря", "разочарование", "безысходность"
+            ],
+            "time_pressure": [
+                "дедлайн", "спешка", "ограниченное время", "срочность", "гонка со временем",
+                "неотложность", "критический момент", "последний шанс", "время истекает"
+            ],
+            "psychological": [
+                "психологическое давление", "манипуляции", "газлайтинг", "шантаж",
+                "моральное принуждение", "внутренний конфликт", "сомнения", "навязчивые мысли"
+            ],
+            "social": [
+                "общественное давление", "остракизм", "буллинг", "дискриминация",
+                "социальное неприятие", "публичное унижение", "изгнание", "осуждение"
+            ]
+        }
+
         prompt = f"""Проанализируй фрагмент текста и определи источник напряжения.
 
 Фрагмент:
 {chunk_text[:1000]}
 
+Возможные источники напряжения:
+• conflict (конфликт): {', '.join(tension_sources_examples['conflict'][:5])}...
+• danger (физическая опасность): {', '.join(tension_sources_examples['danger'][:5])}...
+• mystery (загадка/тайна): {', '.join(tension_sources_examples['mystery'][:5])}...
+• emotion (эмоциональное напряжение): {', '.join(tension_sources_examples['emotion'][:5])}...
+• time_pressure (давление времени): {', '.join(tension_sources_examples['time_pressure'][:5])}...
+• psychological (психологическое давление): {', '.join(tension_sources_examples['psychological'][:5])}...
+• social (социальное напряжение): {', '.join(tension_sources_examples['social'][:5])}...
+
 Задача:
-1. Определи основной источник напряжения: conflict (конфликт), danger (опасность), mystery (загадка), emotion (эмоция), time_pressure (нехватка времени)
+1. Определи ОСНОВНОЙ источник напряжения из списка выше
 2. Кратко опиши (1-2 предложения), что создаёт напряжение
 3. Приведи короткую цитату-доказательство (до 50 символов)
 
 Ответь СТРОГО в формате JSON:
 {{
-    "source": "conflict|danger|mystery|emotion|time_pressure",
+    "source": "conflict|danger|mystery|emotion|time_pressure|psychological|social",
     "description": "краткое описание",
     "excerpt": "цитата из текста"
 }}

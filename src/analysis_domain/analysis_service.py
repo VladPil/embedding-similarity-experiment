@@ -6,14 +6,14 @@ from loguru import logger
 import asyncio
 from datetime import datetime
 
-from src.analysis_domain.entities import AnalysisSession, AnalysisResult
-from src.analysis_domain.base_analyzer import BaseAnalyzer
-from src.text_domain.entities import Text, Chunk
-from src.text_domain.text_chunker import TextChunker
+from src.analysis_domain.entities import AnalysisSession, AnalysisResult, BaseAnalyzer
+from src.text_domain.entities.base_text import BaseText
+from src.text_domain.entities.plain_text import PlainText
+from src.text_domain.services.chunking_service import ChunkingService
 from src.infrastructure.database.repositories import SessionRepository, TextRepository
 from src.infrastructure.queue.progress_broadcaster import ProgressBroadcaster
-from src.model_management.llm_service import LLMService
-from src.model_management.embedding_service import EmbeddingService
+from src.model_management.services.llm_service import LLMService
+from src.model_management.services.embedding_service import EmbeddingService
 from src.common.exceptions import AnalysisError
 from src.common.utils import now_utc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -131,7 +131,7 @@ class AnalysisService:
                     completed_tasks += len(analyzer_names)
                     continue
 
-                text = Text(
+                text = PlainText(
                     id=text_id,
                     title=f"Text {text_id}",
                     content=content,
@@ -172,7 +172,7 @@ class AnalysisService:
                             session_id=session_id,
                             text_id=text_id,
                             analyzer_name=analyzer_name,
-                            result_data=result,
+                            result_data=result.data,
                             interpretation=self._get_interpretation(analyzer_name, result),
                             execution_time_ms=execution_time
                         )
@@ -200,7 +200,7 @@ class AnalysisService:
             await self._broadcast_progress(session_id, 0, f"Ошибка: {str(e)}")
             raise
 
-    async def _chunk_text(self, text: Text) -> List[Chunk]:
+    async def _chunk_text(self, text: BaseText) -> List[Any]:
         """Разбить текст на чанки"""
         from src.text_domain.entities import ChunkingStrategy
 
@@ -213,14 +213,14 @@ class AnalysisService:
             use_paragraph_boundaries=True
         )
 
-        chunker = TextChunker(strategy)
+        chunker = ChunkingService(strategy)
         return chunker.chunk_text(text.content)
 
     async def _run_analyzer(
         self,
         analyzer_name: str,
-        text: Text,
-        chunks: Optional[List[Chunk]],
+        text: BaseText,
+        chunks: Optional[List[Any]],
         mode: str
     ) -> dict:
         """
@@ -251,7 +251,7 @@ class AnalysisService:
 
         return result
 
-    def _get_interpretation(self, analyzer_name: str, result: dict) -> str:
+    def _get_interpretation(self, analyzer_name: str, result: AnalysisResult) -> str:
         """Получить интерпретацию результата"""
         analyzer_class = self._analyzer_registry.get(analyzer_name)
         if not analyzer_class:
@@ -278,9 +278,10 @@ class AnalysisService:
         if self.progress_broadcaster:
             try:
                 await self.progress_broadcaster.broadcast_progress(
-                    session_id=session_id,
+                    task_id=session_id,
+                    status="running",
                     progress=progress,
-                    message=message
+                    current_step=message
                 )
             except Exception as e:
                 logger.error(f"Ошибка broadcast: {e}")

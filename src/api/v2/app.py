@@ -64,7 +64,7 @@ async def startup_event():
             logger.warning("⚠️ Redis недоступен")
 
         # Проверка GPU
-        from src.model_management.gpu_monitor import gpu_monitor
+        from src.model_management.resources.gpu_monitor import gpu_monitor
         gpu_available = gpu_monitor.is_available()
         if gpu_available:
             stats = gpu_monitor.get_stats(device_id=0)

@@ -144,7 +144,7 @@ async def list_sessions(
                     created_at=session.created_at,
                     started_at=session.started_at,
                     completed_at=session.completed_at,
-                    progress=float(session.progress),
+                    progress=float(session.progress) / 100.0,
                     error_message=session.error
                 )
             )
@@ -188,18 +188,28 @@ async def get_session(
 
         # Получаем результаты
         results = await session_repo.get_results(session_id)
-        result_dicts = [
-            {
-                "id": r.id,
+
+        # Группируем результаты по text_id
+        results_by_text = {}
+        for r in results:
+            text_id = r.text_id
+            if text_id not in results_by_text:
+                results_by_text[text_id] = []
+
+            results_by_text[text_id].append({
                 "text_id": r.text_id,
-                "analyzer_name": r.analyzer_name,
-                "result_data": r.result_data,
+                "analyzer_type": r.analyzer_name,
+                "mode": "full_text",  # TODO: получать из данных
+                "data": r.result_data,
                 "interpretation": r.interpretation,
-                "execution_time_ms": r.execution_time_ms,
-                "created_at": r.created_at.isoformat()
-            }
-            for r in results
-        ]
+                "created_at": r.created_at
+            })
+
+        # Вычисляем время выполнения
+        execution_time_seconds = None
+        if session.started_at and session.completed_at:
+            delta = session.completed_at - session.started_at
+            execution_time_seconds = delta.total_seconds()
 
         return AnalysisSessionDetailResponse(
             id=session.id,
@@ -211,9 +221,11 @@ async def get_session(
             created_at=session.created_at,
             started_at=session.started_at,
             completed_at=session.completed_at,
-            progress=float(session.progress),
+            progress=float(session.progress) / 100.0,
             error_message=session.error,
-            results=result_dicts
+            results=results_by_text,
+            comparison_matrix=None,  # TODO: Реализовать сравнения
+            execution_time_seconds=execution_time_seconds
         )
 
     except HTTPException:

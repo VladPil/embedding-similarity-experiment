@@ -31,9 +31,26 @@ class PaceAnalyzer(BaseAnalyzer):
     - Статистику
     """
 
-    def __init__(self):
+    def __init__(self, llm_service=None, prompt_template=None):
         """Инициализация анализатора темпа"""
         self.indexer = ChunkIndexer()
+        self.llm_service = llm_service  # Не используется, но нужен для совместимости
+        self.prompt_template = prompt_template  # Не используется, но нужен для совместимости
+
+    @property
+    def name(self) -> str:
+        """Уникальное имя анализатора"""
+        return "pace"
+
+    @property
+    def display_name(self) -> str:
+        """Человекочитаемое название"""
+        return "Анализ темпа повествования"
+
+    @property
+    def description(self) -> str:
+        """Описание анализатора"""
+        return "Анализирует темп повествования на основе плотности событий, диалогов и динамики текста"
 
     @property
     def requires_llm(self) -> bool:
@@ -68,10 +85,19 @@ class PaceAnalyzer(BaseAnalyzer):
             # Получаем чанки
             chunks = kwargs.get('chunks', [])
             if not chunks:
-                raise AnalysisError(
-                    "Анализ темпа требует чанки текста",
-                    details={"text_id": text.id}
-                )
+                # Если нет чанков, создаем простое разделение по абзацам
+                paragraphs = text.content.split('\n\n')
+                # Создаем псевдо-чанки из абзацев
+                class SimpleChunk:
+                    def __init__(self, content):
+                        self.content = content.strip()
+                        self.metadata = {}  # Добавляем пустые метаданные
+
+                chunks = [SimpleChunk(p) for p in paragraphs if p.strip()]
+
+                if not chunks:
+                    # Если даже абзацев нет, создаем один чанк из всего текста
+                    chunks = [SimpleChunk(text.content)]
 
             # Вычисляем темп для каждого чанка
             pace_scores = []
@@ -120,8 +146,8 @@ class PaceAnalyzer(BaseAnalyzer):
             logger.info(f"Темп: {pace_ru} ({overall_score:.1f}/10)")
 
             return AnalysisResult(
-                analyzer_type=self.__class__.__name__,
                 text_id=text.id,
+                analyzer_name=self.name,
                 mode=mode,
                 data={
                     "overall_pace": pace_rating,

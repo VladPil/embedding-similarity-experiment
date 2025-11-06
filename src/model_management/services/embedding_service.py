@@ -324,3 +324,5 @@ class EmbeddingService:
 
     def __str__(self) -> str:
         return f"EmbeddingService(pool={self.model_pool})"
+
+

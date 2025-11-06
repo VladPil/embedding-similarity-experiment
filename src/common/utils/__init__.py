@@ -22,6 +22,12 @@ from .validation import (
     validate_id_format,
 )
 
+from .id_utils import (
+    generate_id,
+    generate_short_id,
+    generate_uuid,
+)
+
 __all__ = [
     # Datetime utils
     "now_utc",
@@ -40,4 +46,8 @@ __all__ = [
     "validate_file_path",
     "validate_file_extension",
     "validate_id_format",
+    # ID generation
+    "generate_id",
+    "generate_short_id",
+    "generate_uuid",
 ]

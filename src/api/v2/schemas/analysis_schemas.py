@@ -9,8 +9,8 @@ from datetime import datetime
 class AnalysisSessionCreateRequest(BaseModel):
     """Запрос на создание сессии анализа"""
     name: str = Field(..., min_length=1, max_length=200, description="Название сессии")
-    text_ids: List[str] = Field(..., min_items=1, max_items=5, description="ID текстов для анализа (1-5)")
-    analyzer_types: List[str] = Field(..., min_items=1, description="Типы анализаторов")
+    text_ids: List[str] = Field(..., description="ID текстов для анализа (1-5)")
+    analyzer_types: List[str] = Field(..., description="Типы анализаторов")
     mode: str = Field("full_text", description="Режим анализа: full_text/chunked")
     comparator_type: Optional[str] = Field(None, description="Тип компаратора для сравнения")
     chunking_config: Optional[Dict[str, Any]] = Field(None, description="Конфигурация чанкинга")

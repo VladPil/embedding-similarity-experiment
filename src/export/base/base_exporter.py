@@ -99,7 +99,7 @@ class BaseExporter(ABC):
 
         return str(Path(self.output_dir) / filename)
 
-    def _prepare_session_data(self, session: AnalysisSession) -> Dict[str, Any]:
+    async def _prepare_session_data(self, session: AnalysisSession) -> Dict[str, Any]:
         """
         Подготовить данные сессии для экспорта
 
@@ -109,6 +109,22 @@ class BaseExporter(ABC):
         Returns:
             Dict: Данные для экспорта
         """
+        # Подготавливаем данные о текстах асинхронно
+        texts_data = []
+        for text in session.texts:
+            text_data = {
+                "id": text.id,
+                "title": text.title,
+                "length": 0
+            }
+            if hasattr(text, 'get_content'):
+                try:
+                    content = await text.get_content()
+                    text_data["length"] = len(content)
+                except Exception:
+                    text_data["length"] = 0
+            texts_data.append(text_data)
+
         return {
             "session_id": session.id,
             "session_name": session.name,
@@ -116,14 +132,7 @@ class BaseExporter(ABC):
             "mode": session.mode.value,
             "created_at": session.created_at.isoformat(),
             "completed_at": session.completed_at.isoformat() if session.completed_at else None,
-            "texts": [
-                {
-                    "id": text.id,
-                    "title": text.title,
-                    "length": len(await text.get_content()) if hasattr(text, 'get_content') else 0,
-                }
-                for text in session.texts
-            ],
+            "texts": texts_data,
             "analyzers": [
                 {
                     "type": analyzer.__class__.__name__,

@@ -2,6 +2,8 @@
 Обычный текст (plain text)
 """
 import aiofiles
+import tempfile
+import os
 from dataclasses import dataclass, field
 from typing import Optional, Dict
 from pathlib import Path
@@ -151,10 +153,22 @@ class PlainText(BaseText):
             else TextStorageType.FILE
         )
 
+        file_path = None
+        if storage_type == TextStorageType.FILE:
+            # Создаем временный файл для длинного контента
+            temp_dir = tempfile.gettempdir()
+            safe_title = "".join(c if c.isalnum() or c in "._- " else "_" for c in title)
+            file_path = os.path.join(temp_dir, f"text_{text_id}_{safe_title}.txt")
+
+            # Сохраняем контент в файл синхронно (поскольку это не async метод)
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+
         return cls(
             id=text_id,
             title=title,
             content=content if storage_type == TextStorageType.DATABASE else None,
+            file_path=file_path,
             storage_type=storage_type,
             language=language,
             metadata=metadata or {},

@@ -32,7 +32,7 @@ class TextModel(Base):
 
     # Метаданные
     length: Mapped[Optional[int]] = mapped_column(Integer)  # Длина в символах
-    metadata: Mapped[dict] = mapped_column(JSON, default={})
+    text_metadata: Mapped[dict] = mapped_column(JSON, default={})
 
     # FB2 специфичные поля
     author: Mapped[Optional[str]] = mapped_column(String(200))

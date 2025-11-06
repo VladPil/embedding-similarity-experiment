@@ -24,6 +24,7 @@ class TextChunk:
     total_chunks: int        # Общее количество чанков
     overlap_start: int = 0   # Размер перекрытия в начале
     overlap_end: int = 0     # Размер перекрытия в конце
+    strategy_id: str = ""    # ID стратегии, которая создала этот чанк
 
     def get_length(self) -> int:
         """Получить длину чанка"""
@@ -44,6 +45,7 @@ class TextChunk:
             "length": self.get_length(),
             "overlap_start": self.overlap_start,
             "overlap_end": self.overlap_end,
+            "strategy_id": self.strategy_id,
         }
 
 
@@ -85,22 +87,22 @@ class ChunkingService:
             # Валидация стратегии
             strategy.validate()
 
-            # Если текст короткий - возвращаем один чанк
-            if len(text) <= strategy.base_chunk_size:
-                return [TextChunk(
-                    content=text,
-                    start_pos=0,
-                    end_pos=len(text),
-                    chunk_index=0,
-                    total_chunks=1,
-                )]
-
             # Выбор метода разбиения в зависимости от стратегии
             if strategy.use_paragraph_boundaries:
                 chunks = await self._chunk_by_paragraphs(text, strategy)
             elif strategy.use_sentence_boundaries:
                 chunks = await self._chunk_by_sentences(text, strategy)
             else:
+                # Только для fixed_size стратегий проверяем, нужно ли разбивать короткий текст
+                if len(text) <= strategy.base_chunk_size:
+                    return [TextChunk(
+                        content=text,
+                        start_pos=0,
+                        end_pos=len(text),
+                        chunk_index=0,
+                        total_chunks=1,
+                        strategy_id=strategy.id,
+                    )]
                 chunks = await self._chunk_by_fixed_size(text, strategy)
 
             # Выравнивание размеров если требуется
@@ -150,74 +152,105 @@ class ChunkingService:
         paragraph_positions.append(len(text))
 
         chunks = []
-        current_start = 0
-        current_content = []
-        current_length = 0
+        paragraphs_per_chunk = getattr(strategy, 'paragraphs_per_chunk', None)
 
-        for i in range(len(paragraph_positions) - 1):
-            para_start = paragraph_positions[i]
-            para_end = paragraph_positions[i + 1]
-            para_text = text[para_start:para_end]
-            para_length = len(para_text)
+        if paragraphs_per_chunk:
+            # Разбиваем по количеству параграфов
+            para_idx = 0
+            while para_idx < len(paragraph_positions) - 1:
+                # Берем нужное количество параграфов
+                end_para_idx = min(para_idx + paragraphs_per_chunk, len(paragraph_positions) - 1)
 
-            # Если добавление параграфа превысит max_chunk_size
-            if current_length + para_length > strategy.max_chunk_size and current_content:
+                chunk_start = paragraph_positions[para_idx]
+                chunk_end = paragraph_positions[end_para_idx]
+
                 # Создаём чанк
-                chunk_text = ''.join(current_content)
-                chunks.append(TextChunk(
-                    content=chunk_text,
-                    start_pos=current_start,
-                    end_pos=current_start + len(chunk_text),
-                    chunk_index=len(chunks),
-                    total_chunks=0,  # Обновим позже
-                ))
+                chunk_text = text[chunk_start:chunk_end]
+                if chunk_text.strip():  # Только непустые чанки
+                    chunks.append(TextChunk(
+                        content=chunk_text,
+                        start_pos=chunk_start,
+                        end_pos=chunk_end,
+                        chunk_index=len(chunks),
+                        total_chunks=0,
+                        strategy_id=strategy.id,
+                    ))
 
-                # Начинаем новый чанк
-                current_start = para_start
-                current_content = [para_text]
-                current_length = para_length
+                para_idx = end_para_idx
+        else:
+            # Старая логика по размеру (для обратной совместимости)
+            current_start = 0
+            current_content = []
+            current_length = 0
 
-            # Если текущий параграф сам больше max_chunk_size
-            elif para_length > strategy.max_chunk_size:
-                # Сохраняем текущий чанк если есть
-                if current_content:
+            for i in range(len(paragraph_positions) - 1):
+                para_start = paragraph_positions[i]
+                para_end = paragraph_positions[i + 1]
+                para_text = text[para_start:para_end]
+                para_length = len(para_text)
+
+                # Если добавление параграфа превысит max_chunk_size
+                if current_length + para_length > strategy.max_chunk_size and current_content:
+                    # Создаём чанк
                     chunk_text = ''.join(current_content)
                     chunks.append(TextChunk(
                         content=chunk_text,
                         start_pos=current_start,
                         end_pos=current_start + len(chunk_text),
                         chunk_index=len(chunks),
-                        total_chunks=0,
+                        total_chunks=0,  # Обновим позже
+                        strategy_id=strategy.id,
                     ))
 
-                # Разбиваем большой параграф по предложениям
-                para_chunks = await self._chunk_by_sentences(para_text, strategy)
-                for pc in para_chunks:
-                    pc.start_pos += para_start
-                    pc.end_pos += para_start
-                    pc.chunk_index = len(chunks)
-                    chunks.append(pc)
+                    # Начинаем новый чанк
+                    current_start = para_start
+                    current_content = [para_text]
+                    current_length = para_length
 
-                # Начинаем новый чанк
-                current_start = para_end
-                current_content = []
-                current_length = 0
+                # Если текущий параграф сам больше max_chunk_size
+                elif para_length > strategy.max_chunk_size:
+                    # Сохраняем текущий чанк если есть
+                    if current_content:
+                        chunk_text = ''.join(current_content)
+                        chunks.append(TextChunk(
+                            content=chunk_text,
+                            start_pos=current_start,
+                            end_pos=current_start + len(chunk_text),
+                            chunk_index=len(chunks),
+                            total_chunks=0,
+                            strategy_id=strategy.id,
+                        ))
 
-            else:
-                # Добавляем параграф к текущему чанку
-                current_content.append(para_text)
-                current_length += para_length
+                    # Разбиваем большой параграф по предложениям
+                    para_chunks = await self._chunk_by_sentences(para_text, strategy)
+                    for pc in para_chunks:
+                        pc.start_pos += para_start
+                        pc.end_pos += para_start
+                        pc.chunk_index = len(chunks)
+                        pc.strategy_id = strategy.id
+                        chunks.append(pc)
 
-        # Добавляем последний чанк
-        if current_content:
-            chunk_text = ''.join(current_content)
-            chunks.append(TextChunk(
-                content=chunk_text,
-                start_pos=current_start,
-                end_pos=current_start + len(chunk_text),
-                chunk_index=len(chunks),
-                total_chunks=0,
-            ))
+                    # Начинаем новый чанк
+                    current_start = para_end
+                    current_content = []
+                    current_length = 0
+
+                else:
+                    # Добавляем параграф к текущему чанку
+                    current_content.append(para_text)
+                    current_length += para_length
+
+            # Добавляем последний чанк (для старой логики)
+            if current_content:
+                chunk_text = ''.join(current_content)
+                chunks.append(TextChunk(
+                    content=chunk_text,
+                    start_pos=current_start,
+                    end_pos=current_start + len(chunk_text),
+                    chunk_index=len(chunks),
+                    total_chunks=0,
+                    strategy_id=strategy.id,
+                ))
 
         # Обновляем total_chunks
         total = len(chunks)
@@ -249,49 +282,74 @@ class ChunkingService:
             sentence_positions.append(len(text))
 
         chunks = []
-        current_start = 0
-        current_end = 0
+        sentences_per_chunk = getattr(strategy, 'sentences_per_chunk', None)
 
-        i = 0
-        while i < len(sentence_positions) - 1:
-            # Начинаем новый чанк
-            chunk_start = sentence_positions[i]
-            chunk_end = sentence_positions[i]
-            j = i
+        if sentences_per_chunk:
+            # Разбиваем по количеству предложений
+            sentence_idx = 0
+            while sentence_idx < len(sentence_positions) - 1:
+                # Берем нужное количество предложений
+                end_sentence_idx = min(sentence_idx + sentences_per_chunk, len(sentence_positions) - 1)
 
-            # Добавляем предложения пока не достигнем целевого размера
-            while j < len(sentence_positions) - 1:
-                next_end = sentence_positions[j + 1]
-                chunk_length = next_end - chunk_start
+                chunk_start = sentence_positions[sentence_idx]
+                chunk_end = sentence_positions[end_sentence_idx]
 
-                # Проверка размера
-                if chunk_length <= strategy.max_chunk_size:
-                    chunk_end = next_end
-                    j += 1
+                # Создаём чанк
+                chunk_text = text[chunk_start:chunk_end]
+                if chunk_text.strip():  # Только непустые чанки
+                    chunks.append(TextChunk(
+                        content=chunk_text,
+                        start_pos=chunk_start,
+                        end_pos=chunk_end,
+                        chunk_index=len(chunks),
+                        total_chunks=0,
+                        strategy_id=strategy.id,
+                    ))
 
-                    # Если достигли base_chunk_size - хватит
-                    if chunk_length >= strategy.base_chunk_size:
+                sentence_idx = end_sentence_idx
+        else:
+            # Старая логика по размеру (для обратной совместимости)
+            i = 0
+            while i < len(sentence_positions) - 1:
+                # Начинаем новый чанк
+                chunk_start = sentence_positions[i]
+                chunk_end = sentence_positions[i]
+                j = i
+
+                # Добавляем предложения пока не достигнем целевого размера
+                while j < len(sentence_positions) - 1:
+                    next_end = sentence_positions[j + 1]
+                    chunk_length = next_end - chunk_start
+
+                    # Проверка размера
+                    if chunk_length <= strategy.max_chunk_size:
+                        chunk_end = next_end
+                        j += 1
+
+                        # Если достигли base_chunk_size - хватит
+                        if chunk_length >= strategy.base_chunk_size:
+                            break
+                    else:
+                        # Превысили max_chunk_size
                         break
-                else:
-                    # Превысили max_chunk_size
-                    break
 
-            # Если чанк слишком маленький и не последний
-            if chunk_end - chunk_start < strategy.min_chunk_size and j < len(sentence_positions) - 1:
-                j += 1
-                chunk_end = sentence_positions[j] if j < len(sentence_positions) else len(text)
+                # Если чанк слишком маленький и не последний
+                if chunk_end - chunk_start < strategy.min_chunk_size and j < len(sentence_positions) - 1:
+                    j += 1
+                    chunk_end = sentence_positions[j] if j < len(sentence_positions) else len(text)
 
-            # Создаём чанк
-            chunk_text = text[chunk_start:chunk_end]
-            chunks.append(TextChunk(
-                content=chunk_text,
-                start_pos=chunk_start,
-                end_pos=chunk_end,
-                chunk_index=len(chunks),
-                total_chunks=0,
-            ))
+                # Создаём чанк
+                chunk_text = text[chunk_start:chunk_end]
+                chunks.append(TextChunk(
+                    content=chunk_text,
+                    start_pos=chunk_start,
+                    end_pos=chunk_end,
+                    chunk_index=len(chunks),
+                    total_chunks=0,
+                    strategy_id=strategy.id,
+                ))
 
-            i = j
+                i = j
 
         # Обновляем total_chunks
         total = len(chunks)
@@ -330,6 +388,7 @@ class ChunkingService:
                 end_pos=end_pos,
                 chunk_index=len(chunks),
                 total_chunks=0,
+                    strategy_id=strategy.id,
             ))
 
             pos = end_pos

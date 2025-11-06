@@ -21,12 +21,25 @@ class ChunkingStrategy:
     # Основные поля
     id: str
     name: str
+    method: str = "fixed_size"  # Метод разбиения: fixed_size, sentence, paragraph
 
-    # Базовые параметры размера
+    # Базовые параметры размера (для fixed_size)
     base_chunk_size: int = 2000  # Целевой размер чанка в символах
     min_chunk_size: int = 500    # Минимальный размер
     max_chunk_size: int = 4000   # Максимальный размер
-    overlap_percentage: float = 0.1  # Перекрытие между чанками (10%)
+    overlap_percentage: float = 0.0  # Перекрытие между чанками (по умолчанию отключено)
+
+    # Параметры для fixed_size
+    chunk_size: Optional[int] = None  # Фиксированный размер
+    overlap: Optional[int] = None     # Перекрытие в символах
+
+    # Параметры для sentence-based
+    sentences_per_chunk: Optional[int] = None
+    overlap_sentences: Optional[int] = None
+
+    # Параметры для paragraph-based
+    paragraphs_per_chunk: Optional[int] = None
+    overlap_paragraphs: Optional[int] = None
 
     # Адаптивность к структуре текста
     use_sentence_boundaries: bool = True   # Не резать посередине предложения
@@ -69,15 +82,15 @@ class ChunkingStrategy:
         Raises:
             ValueError: Если параметры некорректны
         """
-        if self.min_chunk_size >= self.base_chunk_size:
+        if self.min_chunk_size > self.base_chunk_size:
             raise ValueError(
-                f"min_chunk_size ({self.min_chunk_size}) должен быть меньше "
+                f"min_chunk_size ({self.min_chunk_size}) должен быть меньше или равен "
                 f"base_chunk_size ({self.base_chunk_size})"
             )
 
-        if self.base_chunk_size >= self.max_chunk_size:
+        if self.base_chunk_size > self.max_chunk_size:
             raise ValueError(
-                f"base_chunk_size ({self.base_chunk_size}) должен быть меньше "
+                f"base_chunk_size ({self.base_chunk_size}) должен быть меньше или равен "
                 f"max_chunk_size ({self.max_chunk_size})"
             )
 
@@ -191,26 +204,143 @@ class ChunkingStrategy:
         )
 
     @classmethod
-    def create_fixed_size(cls, size: int) -> "ChunkingStrategy":
+    def create_fixed_size(cls, strategy_id: str, chunk_size: int, overlap: int = 0) -> "ChunkingStrategy":
         """
-        Создать стратегию с фиксированным размером (без адаптивности)
+        Создать стратегию с фиксированным размером
 
         Args:
-            size: Фиксированный размер чанка
+            strategy_id: Уникальный ID стратегии
+            chunk_size: Фиксированный размер чанка
+            overlap: Перекрытие в символах
 
         Returns:
             ChunkingStrategy: Стратегия с фиксированным размером
         """
         return cls(
-            id=f"fixed_{size}",
-            name=f"Fixed Size {size} Strategy",
-            base_chunk_size=size,
-            min_chunk_size=size,
-            max_chunk_size=size,
-            overlap_percentage=0.0,
+            id=strategy_id,
+            name=f"Fixed Size {chunk_size} Strategy",
+            method="fixed_size",
+            base_chunk_size=chunk_size,
+            chunk_size=chunk_size,
+            overlap=overlap,
+            min_chunk_size=chunk_size,
+            max_chunk_size=chunk_size,
+            overlap_percentage=overlap / chunk_size if chunk_size > 0 else 0.0,
             use_sentence_boundaries=False,
             use_paragraph_boundaries=False,
             balance_chunks=False,
+        )
+
+    @classmethod
+    def create_sentence_based(cls, strategy_id: str, sentences_per_chunk: int, overlap_sentences: int = 0) -> "ChunkingStrategy":
+        """
+        Создать стратегию на основе предложений
+
+        Args:
+            strategy_id: Уникальный ID стратегии
+            sentences_per_chunk: Количество предложений в чанке
+            overlap_sentences: Перекрытие в предложениях
+
+        Returns:
+            ChunkingStrategy: Стратегия на основе предложений
+        """
+        return cls(
+            id=strategy_id,
+            name=f"Sentence-based {sentences_per_chunk} Strategy",
+            method="sentence",
+            sentences_per_chunk=sentences_per_chunk,
+            overlap_sentences=overlap_sentences,
+            use_sentence_boundaries=True,
+            use_paragraph_boundaries=False,  # Для sentence-based не используем paragraph boundaries
+            balance_chunks=False,  # Для sentence-based не выравниваем чанки
+        )
+
+    @classmethod
+    def create_paragraph_based(cls, strategy_id: str, paragraphs_per_chunk: int, overlap_paragraphs: int = 0) -> "ChunkingStrategy":
+        """
+        Создать стратегию на основе параграфов
+
+        Args:
+            strategy_id: Уникальный ID стратегии
+            paragraphs_per_chunk: Количество параграфов в чанке
+            overlap_paragraphs: Перекрытие в параграфах
+
+        Returns:
+            ChunkingStrategy: Стратегия на основе параграфов
+        """
+        return cls(
+            id=strategy_id,
+            name=f"Paragraph-based {paragraphs_per_chunk} Strategy",
+            method="paragraph",
+            paragraphs_per_chunk=paragraphs_per_chunk,
+            overlap_paragraphs=overlap_paragraphs,
+            use_sentence_boundaries=False,  # Для paragraph-based не используем sentence boundaries
+            use_paragraph_boundaries=True,
+            balance_chunks=False,  # Для paragraph-based не выравниваем чанки
+        )
+
+    @classmethod
+    def create_adaptive(cls, text_length: int, model_context_length: int = 8192, prompt_overhead: int = 1000) -> "ChunkingStrategy":
+        """
+        Создать адаптивную стратегию на основе размера текста и контекста модели
+
+        Args:
+            text_length: Длина текста в символах
+            model_context_length: Максимальная длина контекста модели (токены)
+            prompt_overhead: Количество токенов, резервируемых под промпт
+
+        Returns:
+            ChunkingStrategy: Адаптивная стратегия
+        """
+        # Примерно 4 символа на токен для русского языка
+        chars_per_token = 4
+
+        # Доступное место для текста в токенах
+        available_tokens = model_context_length - prompt_overhead
+
+        # Доступное место для текста в символах
+        available_chars = available_tokens * chars_per_token
+
+        # Определяем оптимальное количество чанков
+        if text_length <= available_chars:
+            # Текст помещается в один чанк
+            chunk_size = max(500, text_length)
+            num_chunks = 1
+        else:
+            # Нужно разбить на несколько чанков
+            # Стремимся к chunk_size ~= available_chars * 0.8 (оставляем запас)
+            optimal_chunk_size = int(available_chars * 0.8)
+            num_chunks = max(2, (text_length + optimal_chunk_size - 1) // optimal_chunk_size)
+            chunk_size = max(500, text_length // num_chunks)
+
+        # Определяем размеры с запасами
+        base_chunk_size = min(chunk_size, available_chars)
+        min_chunk_size = max(200, base_chunk_size // 4)
+        max_chunk_size = min(available_chars, base_chunk_size * 2)
+
+        # Определяем перекрытие (10% для коротких текстов, 5% для длинных)
+        overlap_percentage = 0.1 if text_length < 50000 else 0.05
+
+        return cls(
+            id=f"adaptive_{text_length}",
+            name=f"Adaptive Strategy for {text_length} chars",
+            method="fixed_size",
+            base_chunk_size=base_chunk_size,
+            min_chunk_size=min_chunk_size,
+            max_chunk_size=max_chunk_size,
+            overlap_percentage=overlap_percentage,
+            chunk_size=base_chunk_size,
+            overlap=int(base_chunk_size * overlap_percentage),
+            use_sentence_boundaries=True,
+            use_paragraph_boundaries=True,
+            balance_chunks=True,
+            metadata={
+                "text_length": text_length,
+                "estimated_chunks": num_chunks,
+                "model_context_length": model_context_length,
+                "prompt_overhead": prompt_overhead,
+                "adaptive": True
+            }
         )
 
     def __str__(self) -> str:

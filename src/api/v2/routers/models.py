@@ -18,11 +18,9 @@ from ..schemas.model_schemas import (
 )
 from src.infrastructure.database.connection import get_db
 from src.infrastructure.database.repositories import ModelConfigRepository
-from src.model_management.model_pool import model_pool
-from src.model_management.gpu_monitor import gpu_monitor
-from ..dependencies import get_llm_service, get_embedding_service
-from src.model_management.llm_service import LLMService
-from src.model_management.embedding_service import EmbeddingService
+from ..dependencies import get_llm_service, get_embedding_service, get_model_pool, get_gpu_monitor
+from src.model_management.services.llm_service import LLMService
+from src.model_management.services.embedding_service import EmbeddingService
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/models", tags=["models"])
@@ -147,7 +145,8 @@ async def load_model(
             raise HTTPException(status_code=404, detail="Config not found")
 
         # Загружаем через model_pool
-        success = await model_pool.load_model(
+        pool = get_model_pool()
+        success = await pool.load_model(
             model_name=config.model_name,
             model_type=config.model_type,
             quantization=config.quantization,

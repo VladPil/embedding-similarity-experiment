@@ -19,9 +19,9 @@ class Settings(BaseSettings):
 
     # База данных PostgreSQL
     POSTGRES_HOST: str = "localhost"
-    POSTGRES_PORT: int = 5432
-    POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: str = "postgres"
+    POSTGRES_PORT: int = 5433  # Docker использует 5433
+    POSTGRES_USER: str = "embedding_user"
+    POSTGRES_PASSWORD: str = "embedding_password"
     POSTGRES_DB: str = "embedding_db"
 
     @property
@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"  # Игнорировать дополнительные поля из .env
 
 
 # Singleton instance

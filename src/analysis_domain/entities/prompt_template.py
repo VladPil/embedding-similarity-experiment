@@ -213,6 +213,73 @@ class PromptTemplate:
             is_default=True,
         )
 
+    @classmethod
+    def create_default_theme_prompt(cls) -> "PromptTemplate":
+        """
+        Создать шаблон по умолчанию для анализа тем
+        """
+        return cls(
+            id="default_theme",
+            name="Анализ тем (по умолчанию)",
+            analyzer_type="theme",
+            system_prompt="""Ты - эксперт по литературному анализу.
+Твоя задача - найти основные темы в тексте.
+Отвечай в формате JSON со списком тем и их описаниями.""",
+            user_prompt_template="""Найди основные темы в следующем тексте:
+
+{text}
+
+Верни результат в формате JSON со списком тем.""",
+            temperature=0.5,
+            max_tokens=800,
+            is_default=True,
+        )
+
+    @classmethod
+    def create_default_tension_prompt(cls) -> "PromptTemplate":
+        """
+        Создать шаблон по умолчанию для анализа напряжения
+        """
+        return cls(
+            id="default_tension",
+            name="Анализ напряжения (по умолчанию)",
+            analyzer_type="tension",
+            system_prompt="""Ты - эксперт по анализу драматического напряжения в тексте.
+Оцени уровень напряжения от 0 до 10 и опиши источники напряжения.
+Отвечай в формате JSON.""",
+            user_prompt_template="""Оцени уровень напряжения в следующем тексте:
+
+{text}
+
+Верни результат в формате JSON с уровнем напряжения (0-10) и описанием.""",
+            temperature=0.4,
+            max_tokens=600,
+            is_default=True,
+        )
+
+    @classmethod
+    def create_default_character_prompt(cls) -> "PromptTemplate":
+        """
+        Создать шаблон по умолчанию для анализа персонажей
+        """
+        return cls(
+            id="default_character",
+            name="Анализ персонажей (по умолчанию)",
+            analyzer_type="character",
+            system_prompt="""Ты - эксперт по анализу литературных персонажей.
+Найди персонажей в тексте и опиши их роли и характеристики.
+Отвечай в формате JSON.""",
+            user_prompt_template="""Найди персонажей в следующем тексте:
+
+{text}
+
+Для каждого персонажа укажи имя, роль и краткое описание.
+Верни результат в формате JSON.""",
+            temperature=0.4,
+            max_tokens=800,
+            is_default=True,
+        )
+
     def __str__(self) -> str:
         return f"PromptTemplate(name={self.name!r}, analyzer={self.analyzer_type})"
 

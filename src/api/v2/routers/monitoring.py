@@ -179,7 +179,7 @@ async def health_check(
         from src.common.utils import now_utc
         from src.infrastructure.database.connection import db_connection
         from src.infrastructure.cache.redis_client import redis_client
-        from src.model_management.gpu_monitor import gpu_monitor
+        from src.model_management.resources.gpu_monitor import gpu_monitor
 
         checks = {}
 

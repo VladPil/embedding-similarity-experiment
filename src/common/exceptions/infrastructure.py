@@ -20,6 +20,11 @@ class DatabaseQueryError(DatabaseError):
     pass
 
 
+class DatabaseOperationError(DatabaseError):
+    """Ошибка операции с базой данных"""
+    pass
+
+
 # Кэш
 class CacheError(AppException):
     """Ошибка кэша"""

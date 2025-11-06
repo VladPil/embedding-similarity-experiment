@@ -15,8 +15,8 @@ from ..schemas.text_schemas import (
 )
 from src.infrastructure.database.connection import get_db
 from src.infrastructure.database.repositories import TextRepository
-from src.text_domain.text_chunker import TextChunker
-from src.text_domain.entities import ChunkingStrategy
+from src.text_domain.services.chunking_service import ChunkingService
+from src.text_domain.entities.chunking_strategy import ChunkingStrategy
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/texts", tags=["texts"])
@@ -66,7 +66,7 @@ async def create_text(
             title=text.title,
             storage_type=text.storage_type,
             content_length=text.length,
-            metadata=text.metadata,
+            metadata=text.text_metadata or {},
             created_at=text.created_at.isoformat()
         )
 
@@ -121,7 +121,7 @@ async def create_fb2_book(
             title=text.title,
             storage_type=text.storage_type,
             content_length=text.length,
-            metadata=text.metadata,
+            metadata=text.text_metadata or {},
             created_at=text.created_at.isoformat()
         )
 
@@ -154,7 +154,7 @@ async def list_texts(
                 title=text.title,
                 storage_type=text.storage_type,
                 content_length=text.length,
-                metadata=text.metadata,
+                metadata=text.text_metadata or {},
                 created_at=text.created_at.isoformat()
             )
             for text in texts
@@ -196,7 +196,7 @@ async def get_text(
             title=text.title,
             storage_type=text.storage_type,
             content_length=text.length,
-            metadata=text.metadata,
+            metadata=text.text_metadata or {},
             created_at=text.created_at.isoformat()
         )
 
@@ -259,29 +259,37 @@ async def chunk_text(
             raise HTTPException(status_code=404, detail="Text not found")
 
         # Создаём стратегию чанкинга
-        use_sentence = request.boundary_type == "sentence"
-        use_paragraph = request.boundary_type == "paragraph"
-
-        strategy = ChunkingStrategy(
-            base_chunk_size=request.chunk_size,
-            min_chunk_size=max(100, request.chunk_size // 2),
-            max_chunk_size=min(5000, request.chunk_size * 2),
-            overlap_percentage=request.overlap / request.chunk_size if request.chunk_size > 0 else 0.1,
-            use_sentence_boundaries=use_sentence,
-            use_paragraph_boundaries=use_paragraph
-        )
+        if request.boundary_type == "sentence":
+            strategy = ChunkingStrategy.create_sentence_based(
+                strategy_id=f"api-sentence-{request.text_id}",
+                sentences_per_chunk=max(1, request.chunk_size // 100),
+                overlap_sentences=max(0, request.overlap // 100)
+            )
+        elif request.boundary_type == "paragraph":
+            strategy = ChunkingStrategy.create_paragraph_based(
+                strategy_id=f"api-paragraph-{request.text_id}",
+                paragraphs_per_chunk=max(1, request.chunk_size // 200),
+                overlap_paragraphs=max(0, request.overlap // 200)
+            )
+        else:
+            strategy = ChunkingStrategy.create_fixed_size(
+                strategy_id=f"api-fixed-{request.text_id}",
+                chunk_size=request.chunk_size,
+                overlap=request.overlap
+            )
 
         # Чанкуем
-        chunker = TextChunker(strategy)
-        chunks = chunker.chunk_text(content)
+        chunking_service = ChunkingService()
+        chunks = await chunking_service.chunk_text(content, strategy)
 
         # Форматируем ответ
         chunk_dicts = [
             {
-                "index": chunk.index,
+                "index": chunk.chunk_index,
                 "content": chunk.content,
                 "start_pos": chunk.start_pos,
-                "end_pos": chunk.end_pos
+                "end_pos": chunk.end_pos,
+                "metadata": {}  # Добавляем пустой словарь метаданных
             }
             for chunk in chunks
         ]
