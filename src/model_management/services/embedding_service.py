@@ -72,6 +72,9 @@ class EmbeddingService:
             )
 
         try:
+            import time
+            start_time = time.time()
+
             # Батчевая обработка
             embeddings = []
             batch_size = instance.config.batch_size
@@ -92,10 +95,13 @@ class EmbeddingService:
             # Объединяем батчи
             all_embeddings = np.vstack(embeddings)
 
+            # Измеряем время
+            inference_time_ms = (time.time() - start_time) * 1000
+
             # Статистика
             instance.record_request(success=True)
             instance.config.update_usage_stats(
-                inference_time_ms=0.0,  # TODO: измерить реальное время
+                inference_time_ms=inference_time_ms,
                 tokens_processed=sum(len(t.split()) for t in texts)
             )
 

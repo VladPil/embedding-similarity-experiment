@@ -61,13 +61,21 @@ class CosineComparator(BaseComparator):
                 emb1 = context["embeddings"].get(text1.id)
                 emb2 = context["embeddings"].get(text2.id)
             else:
-                # TODO: Получить через embedding_service
-                # emb1 = await self.embedding_service.get_embedding(text1)
-                # emb2 = await self.embedding_service.get_embedding(text2)
+                # Получаем через embedding_service
+                if self.embedding_service:
+                    # Получаем содержимое текстов
+                    content1 = await text1.get_content() if hasattr(text1, 'get_content') else str(text1)
+                    content2 = await text2.get_content() if hasattr(text2, 'get_content') else str(text2)
 
-                # Заглушка: случайные векторы
-                emb1 = np.random.rand(384)
-                emb2 = np.random.rand(384)
+                    # Получаем embeddings
+                    embeddings = await self.embedding_service.encode([content1, content2])
+                    emb1 = embeddings[0]
+                    emb2 = embeddings[1]
+                else:
+                    # Fallback: если сервис не доступен, используем случайные векторы
+                    logger.warning("Embedding service не доступен, используем случайные векторы")
+                    emb1 = np.random.rand(384)
+                    emb2 = np.random.rand(384)
 
             # Вычисляем косинусное сходство
             similarity = self._cosine_similarity(emb1, emb2)

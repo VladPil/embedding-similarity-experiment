@@ -74,6 +74,9 @@ class LLMService:
             )
 
         try:
+            import time
+            start_time = time.time()
+
             # Подготовка промпта
             inputs = instance.tokenizer(
                 prompt,
@@ -112,10 +115,13 @@ class LLMService:
                         generated_text = generated_text.split(stop_seq)[0]
                         break
 
+            # Измеряем время
+            inference_time_ms = (time.time() - start_time) * 1000
+
             # Статистика
             instance.record_request(success=True)
             instance.config.update_usage_stats(
-                inference_time_ms=0.0,  # TODO: измерить реальное время
+                inference_time_ms=inference_time_ms,
                 tokens_processed=outputs.shape[1]
             )
 
@@ -155,9 +161,13 @@ class LLMService:
         Returns:
             List[str]: Список сгенерированных текстов
         """
-        results = []
+        # Примечание: Настоящий батчинг требует более сложной реализации
+        # с учетом padding и обработки разной длины входов.
+        # Для простоты используем последовательную генерацию.
+        import asyncio
 
-        # TODO: Оптимизировать для реального батчинга
+        # Генерируем промпты последовательно (можно распараллелить)
+        results = []
         for prompt in prompts:
             result = await self.generate(prompt, model_name=model_name, **kwargs)
             results.append(result)
@@ -275,8 +285,20 @@ class LLMService:
         Returns:
             int: Примерное количество токенов
         """
-        # Простая оценка: 1 токен ≈ 4 символа для английского, ≈ 2 для русского
-        # TODO: Использовать реальный токенизатор
+        # Попытаемся использовать реальный токенизатор если модель доступна
+        try:
+            config_id = await self._find_llm_model(model_name)
+            if config_id:
+                instance = await self.model_pool.get_instance(config_id)
+                if instance and instance.tokenizer:
+                    tokens = instance.tokenizer.encode(text)
+                    return len(tokens)
+        except Exception as e:
+            logger.debug(f"Не удалось использовать токенизатор для оценки: {e}")
+
+        # Fallback: простая оценка
+        # 1 токен ≈ 4 символа для английского, ≈ 2-3 для русского
+        # Используем среднее значение
         return len(text) // 3
 
     def __str__(self) -> str:

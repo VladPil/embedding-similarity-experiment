@@ -1,0 +1,295 @@
+"""
+IVF Flat индекс - разбиение на кластеры для быстрого поиска
+"""
+from typing import Optional, List, Tuple
+import numpy as np
+import faiss
+from loguru import logger
+
+from ..entities.base_index import BaseIndex
+from src.common.types import IndexID
+
+
+class IVFFlatIndex(BaseIndex):
+    """
+    IVF (Inverted File) Flat индекс
+
+    Разбивает векторы на кластеры (Voronoi ячейки) и ищет только в ближайших.
+
+    Преимущества:
+    - Быстрее чем Flat на больших датасетах
+    - Точность близка к 100% при правильных nprobe
+
+    Недостатки:
+    - Требует обучения
+    - Нужно подбирать nlist и nprobe
+
+    Рекомендации:
+    - nlist = sqrt(N) для N векторов
+    - nprobe = nlist/10 для баланса скорость/точность
+
+    Рекомендуется для: 100K - 10M векторов
+    """
+
+    def __init__(
+        self,
+        index_id: IndexID,
+        dimension: int,
+        nlist: int = 100,
+        nprobe: int = 10,
+        metric: str = "cosine",
+        use_gpu: bool = False
+    ):
+        """
+        Инициализация IVF Flat индекса
+
+        Args:
+            index_id: ID индекса
+            dimension: Размерность векторов
+            nlist: Количество кластеров (Voronoi ячеек)
+            nprobe: Количество проверяемых кластеров при поиске
+            metric: Метрика расстояния
+            use_gpu: Использовать GPU
+        """
+        super().__init__(index_id, dimension, metric, use_gpu)
+        self.nlist = nlist
+        self.nprobe = nprobe
+        self._init_index()
+
+    def _init_index(self) -> None:
+        """Инициализировать FAISS индекс"""
+        # Создаём квантизатор (для разбиения на кластеры)
+        if self.metric == "cosine" or self.metric == "ip":
+            quantizer = faiss.IndexFlatIP(self.dimension)
+            self._index = faiss.IndexIVFFlat(
+                quantizer,
+                self.dimension,
+                self.nlist,
+                faiss.METRIC_INNER_PRODUCT
+            )
+        elif self.metric == "l2":
+            quantizer = faiss.IndexFlatL2(self.dimension)
+            self._index = faiss.IndexIVFFlat(
+                quantizer,
+                self.dimension,
+                self.nlist,
+                faiss.METRIC_L2
+            )
+        else:
+            raise ValueError(f"Неподдерживаемая метрика: {self.metric}")
+
+        # Устанавливаем nprobe
+        self._index.nprobe = self.nprobe
+
+        # Переносим на GPU если нужно
+        if self.use_gpu:
+            self._move_to_gpu()
+
+        logger.info(
+            f"✅ IVF Flat индекс создан: {self.dimension}D, "
+            f"nlist={self.nlist}, nprobe={self.nprobe}"
+        )
+
+    def build(self) -> None:
+        """
+        Построить индекс (обучить на добавленных векторах)
+
+        Должен быть вызван после add_vectors, но можно добавлять векторы и после
+        """
+        if not self.is_trained():
+            logger.warning("IVF индекс не обучен. Вызовите train() с достаточным количеством векторов.")
+
+    def train(self, training_vectors: np.ndarray) -> None:
+        """
+        Обучить индекс на векторах
+
+        Args:
+            training_vectors: Векторы для обучения (рекомендуется 30*nlist)
+        """
+        if training_vectors.shape[1] != self.dimension:
+            raise ValueError(
+                f"Неверная размерность векторов: ожидается {self.dimension}, "
+                f"получено {training_vectors.shape[1]}"
+            )
+
+        # Проверяем количество векторов
+        min_vectors = self.nlist * 30
+        if len(training_vectors) < min_vectors:
+            logger.warning(
+                f"Мало векторов для обучения: {len(training_vectors)}, "
+                f"рекомендуется минимум {min_vectors}"
+            )
+
+        # Конвертируем в float32
+        if training_vectors.dtype != np.float32:
+            training_vectors = training_vectors.astype(np.float32)
+
+        # Нормализуем для cosine
+        if self.metric == "cosine":
+            training_vectors = self._normalize_vectors(training_vectors.copy())
+
+        # Обучаем
+        logger.info(f"🎓 Обучение IVF индекса на {len(training_vectors)} векторах...")
+        self._index.train(training_vectors)
+
+        logger.info("✅ IVF индекс обучен")
+
+    def add_vectors(
+        self,
+        vectors: np.ndarray,
+        ids: Optional[List[int]] = None
+    ) -> List[int]:
+        """
+        Добавить векторы в индекс
+
+        Args:
+            vectors: Матрица векторов (N x D)
+            ids: ID векторов (опционально)
+
+        Returns:
+            List[int]: ID добавленных векторов
+        """
+        if vectors.shape[1] != self.dimension:
+            raise ValueError(
+                f"Неверная размерность векторов: ожидается {self.dimension}, "
+                f"получено {vectors.shape[1]}"
+            )
+
+        # Конвертируем в float32
+        if vectors.dtype != np.float32:
+            vectors = vectors.astype(np.float32)
+
+        # Обучаем если ещё не обучен
+        if not self.is_trained():
+            logger.info("Индекс не обучен. Обучаем на добавляемых векторах...")
+            self.train(vectors)
+
+        # Нормализуем для cosine
+        if self.metric == "cosine":
+            vectors = self._normalize_vectors(vectors.copy())
+
+        # Текущий размер
+        start_id = self._index.ntotal
+
+        # Добавляем векторы
+        self._index.add(vectors)
+
+        # Генерируем ID
+        generated_ids = list(range(start_id, start_id + len(vectors)))
+
+        # Метаданные
+        if ids:
+            for gen_id, orig_id in zip(generated_ids, ids):
+                self.metadata.add_metadata(gen_id, {"original_id": orig_id})
+
+        # Статистика
+        self.stats.record_addition(len(vectors))
+
+        logger.info(f"➕ Добавлено {len(vectors)} векторов в IVF Flat индекс")
+
+        return generated_ids
+
+    def search(
+        self,
+        query_vectors: np.ndarray,
+        k: int = 10
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Поиск ближайших соседей
+
+        Args:
+            query_vectors: Запросные векторы (N x D)
+            k: Количество соседей
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: (расстояния, ID)
+        """
+        import time
+
+        if not self.is_trained():
+            raise RuntimeError("Индекс не обучен. Вызовите train() или add_vectors()")
+
+        if query_vectors.shape[1] != self.dimension:
+            raise ValueError(
+                f"Неверная размерность запроса: ожидается {self.dimension}, "
+                f"получено {query_vectors.shape[1]}"
+            )
+
+        # Конвертируем в float32
+        if query_vectors.dtype != np.float32:
+            query_vectors = query_vectors.astype(np.float32)
+
+        # Нормализуем для cosine
+        if self.metric == "cosine":
+            query_vectors = self._normalize_vectors(query_vectors.copy())
+
+        # Ограничиваем k
+        k = min(k, self._index.ntotal)
+
+        # Поиск
+        start_time = time.time()
+        distances, ids = self._index.search(query_vectors, k)
+        search_time_ms = (time.time() - start_time) * 1000
+
+        # Статистика
+        self.stats.record_search(search_time_ms)
+
+        logger.debug(
+            f"🔍 Поиск IVF завершён: {len(query_vectors)} запросов, "
+            f"k={k}, nprobe={self.nprobe}, время={search_time_ms:.2f}ms"
+        )
+
+        return distances, ids
+
+    def remove_vectors(self, ids: List[int]) -> int:
+        """
+        Удалить векторы из индекса
+
+        Args:
+            ids: ID векторов для удаления
+
+        Returns:
+            int: Количество удалённых векторов
+        """
+        # IVF поддерживает удаление через IDSelector
+        if not ids:
+            return 0
+
+        try:
+            # Создаём селектор для удаления
+            id_selector = faiss.IDSelectorBatch(ids)
+
+            # Удаляем
+            removed = self._index.remove_ids(id_selector)
+
+            # Обновляем метаданные
+            for vid in ids:
+                self.metadata.remove_metadata(vid)
+
+            # Статистика
+            self.stats.record_removal(removed)
+
+            logger.info(f"🗑️ Удалено {removed} векторов из IVF индекса")
+
+            return removed
+
+        except Exception as e:
+            logger.error(f"Ошибка удаления векторов: {e}")
+            return 0
+
+    def set_nprobe(self, nprobe: int) -> None:
+        """
+        Изменить количество проверяемых кластеров
+
+        Больше nprobe = выше точность но медленнее
+
+        Args:
+            nprobe: Новое значение nprobe
+        """
+        self.nprobe = nprobe
+        self._index.nprobe = nprobe
+        logger.info(f"Установлено nprobe={nprobe}")
+
+    def get_nprobe(self) -> int:
+        """Получить текущее значение nprobe"""
+        return self._index.nprobe
